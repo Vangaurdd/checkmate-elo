@@ -422,6 +422,15 @@ class ChessGame:
         turn_text = info_font_bold.render(turn_str, True, INFO_TEXT)
         screen.blit(turn_text, (pad, int(PANEL_TOP + cell * 0.14)))
 
+        menu_btn_w = int(cell * 1.3)
+        menu_btn_h = int(cell * 0.34)
+        self.menu_button_rect = pygame.Rect(int(WINDOW_WIDTH - pad - menu_btn_w), int(PANEL_TOP + cell * 0.08), menu_btn_w, menu_btn_h)
+        menu_hovered = self.menu_button_rect.collidepoint(pygame.mouse.get_pos())
+        pygame.draw.rect(screen, _hover_color(PANEL_BG, menu_hovered, 16), self.menu_button_rect, border_radius=8)
+        pygame.draw.rect(screen, PANEL_ACCENT, self.menu_button_rect, 2, border_radius=8)
+        menu_text = fit_text("Menu (Esc)", int(cell * 0.20), menu_btn_w - 12, INFO_TEXT, bold=True)
+        screen.blit(menu_text, menu_text.get_rect(center=self.menu_button_rect.center))
+
         rating_text = info_font.render(f"Player: {int(self.player_rating)}   AI: {int(self.ai_rating)}", True, MUTED_TEXT)
         screen.blit(rating_text, (pad, int(PANEL_TOP + cell * 0.48)))
 
@@ -1021,6 +1030,11 @@ def choose_start_mode(screen, clock, saved, fullscreen):
                 screen.blit(delta_text, delta_rect)
                 row_y += row_h
 
+        credit_text = hint_font.render("Made by Vangaurdd", True, MUTED_TEXT)
+        credit_rect = credit_text.get_rect()
+        credit_rect.bottomright = (WINDOW_WIDTH - int(cell * 0.25), WINDOW_HEIGHT - int(cell * 0.18))
+        screen.blit(credit_text, credit_rect)
+
         pygame.display.update()
 
 
@@ -1207,59 +1221,70 @@ def main():
     set_layout(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
     init_piece_images()
 
-    saved = load_saved_ratings()
-    history = list(saved[2]) if saved else []
-    screen, fullscreen, mode = choose_start_mode(screen, clock, saved, fullscreen)
-    if mode == "continue" and saved:
-        game = ChessGame(player_rating=saved[0], ai_rating=saved[1], calibration_mode=False)
-    else:
-        game = ChessGame(player_rating=1000, ai_rating=1000, calibration_mode=True)
+    app_running = True
+    while app_running:
+        saved = load_saved_ratings()
+        history = list(saved[2]) if saved else []
+        screen, fullscreen, mode = choose_start_mode(screen, clock, saved, fullscreen)
+        if mode == "continue" and saved:
+            game = ChessGame(player_rating=saved[0], ai_rating=saved[1], calibration_mode=False)
+        else:
+            game = ChessGame(player_rating=1000, ai_rating=1000, calibration_mode=True)
 
-    running = True
-    while running:
-        clock.tick(30)
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            screen, fullscreen = handle_resize_events(event, screen, fullscreen)
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                if game.game_over:
-                    if hasattr(game, "replay_button_rect") and game.replay_button_rect.collidepoint(pygame.mouse.get_pos()):
-                        game.replay_game(screen, clock)
+        game_running = True
+        while game_running:
+            clock.tick(30)
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    game_running = False
+                    app_running = False
+                screen, fullscreen = handle_resize_events(event, screen, fullscreen)
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if hasattr(game, "menu_button_rect") and game.menu_button_rect.collidepoint(pygame.mouse.get_pos()):
+                        game_running = False
                         continue
-                    if hasattr(game, "review_button_rect") and game.review_button_rect.collidepoint(pygame.mouse.get_pos()):
-                        screen, fullscreen = show_review_screen(screen, clock, game.review_data or [], game.last_game_moves, fullscreen)
-                        continue
-                if game.board.turn == chess.WHITE and not game.game_over:
-                    game.handle_click(pygame.mouse.get_pos(), screen, clock)
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_r:
-                    game.reset_game()
+                    if game.game_over:
+                        if hasattr(game, "replay_button_rect") and game.replay_button_rect.collidepoint(pygame.mouse.get_pos()):
+                            game.replay_game(screen, clock)
+                            continue
+                        if hasattr(game, "review_button_rect") and game.review_button_rect.collidepoint(pygame.mouse.get_pos()):
+                            screen, fullscreen = show_review_screen(screen, clock, game.review_data or [], game.last_game_moves, fullscreen)
+                            continue
+                    if game.board.turn == chess.WHITE and not game.game_over:
+                        game.handle_click(pygame.mouse.get_pos(), screen, clock)
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_r:
+                        game.reset_game()
+                    if event.key == pygame.K_ESCAPE:
+                        game_running = False
 
-        if game.game_over and not game.ratings_updated:
-            before = game.player_rating
-            game.update_ratings()
-            game.ratings_updated = True
-            result = game.board.result()
-            outcome = "Win" if result == "1-0" else "Loss" if result == "0-1" else "Draw"
-            history.append({
-                "date": time.strftime("%b %d"),
-                "result": outcome,
-                "before": round(before),
-                "after": round(game.player_rating),
-            })
-            history = history[-50:]
-            save_ratings(game.player_rating, game.ai_rating, history)
+            if not game_running:
+                break
 
-            screen.blit(get_background_gradient(WINDOW_WIDTH, WINDOW_HEIGHT), (0, 0))
-            loading = title_font.render("Analyzing your game…", True, (216, 178, 122))
-            screen.blit(loading, loading.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2)))
+            if game.game_over and not game.ratings_updated:
+                before = game.player_rating
+                game.update_ratings()
+                game.ratings_updated = True
+                result = game.board.result()
+                outcome = "Win" if result == "1-0" else "Loss" if result == "0-1" else "Draw"
+                history.append({
+                    "date": time.strftime("%b %d"),
+                    "result": outcome,
+                    "before": round(before),
+                    "after": round(game.player_rating),
+                })
+                history = history[-50:]
+                save_ratings(game.player_rating, game.ai_rating, history)
+
+                screen.blit(get_background_gradient(WINDOW_WIDTH, WINDOW_HEIGHT), (0, 0))
+                loading = title_font.render("Analyzing your game…", True, (216, 178, 122))
+                screen.blit(loading, loading.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2)))
+                pygame.display.update()
+                game.review_data = game.review_game()
+
+            screen.fill(BLACK)
+            game.draw_board(screen)
             pygame.display.update()
-            game.review_data = game.review_game()
-
-        screen.fill(BLACK)
-        game.draw_board(screen)
-        pygame.display.update()
 
     pygame.quit()
     sys.exit()

@@ -64,6 +64,7 @@ every loss comes with a reason.
 - **Mouse** — click a piece, then click a highlighted square to move it.
 - **R** — reset the current game.
 - **F11** — toggle fullscreen.
+- **Esc**, or the **Menu** button in-game — return to the start screen at any time.
 - On the game-over screen, click **Replay** to watch the game again, or **Review** to open Game Review.
 - In Game Review, **click any move** in the list to jump the board to that exact position — a full rewatch with every move's score, not just a list. Use **◀ ▶** (or the arrow keys) to step move-by-move.
 
