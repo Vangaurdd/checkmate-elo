@@ -1,11 +1,13 @@
 import pygame
 import sys
 import chess
+import chess.engine
 import math
 import random
 import time
 import os
 import json
+import shutil
 
 pygame.init()
 
@@ -16,6 +18,13 @@ RATINGS_FILE = os.path.join(APP_SUPPORT_DIR, "ratings.json")
 def resource_path(*parts):
     base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base, *parts)
+
+
+def find_stockfish():
+    bundled = resource_path("stockfish")
+    if os.path.exists(bundled):
+        return bundled
+    return shutil.which("stockfish")
 
 
 def load_saved_ratings():
@@ -225,14 +234,22 @@ def _hover_color(color, hovered, amount=24):
 
 
 REVIEW_DEPTH = 3
-LOSS_THRESHOLDS = [15, 50, 100, 175, 275, 400, 550, 750, 1100]
+STOCKFISH_REVIEW_DEPTH = 14
 
 
-def loss_to_score(loss):
-    for i, t in enumerate(LOSS_THRESHOLDS):
-        if loss <= t:
-            return 10 - i
-    return 1
+def win_percent(centipawns):
+    centipawns = max(-1000, min(1000, centipawns))
+    return 50 + 50 * (2 / (1 + math.exp(-0.00368208 * centipawns)) - 1)
+
+
+def move_accuracy(win_pct_before, win_pct_after):
+    win_pct_loss = max(0.0, win_pct_before - win_pct_after)
+    accuracy = 103.1668 * math.exp(-0.04354 * win_pct_loss) - 3.1669
+    return max(0.0, min(100.0, accuracy))
+
+
+def accuracy_to_score(accuracy):
+    return max(1, min(10, round(accuracy / 10)))
 
 
 class ChessGame:
@@ -672,6 +689,40 @@ class ChessGame:
     def review_game(self):
         if not self.last_game_moves:
             return []
+        engine_path = find_stockfish()
+        if engine_path:
+            try:
+                return self._review_with_stockfish(engine_path)
+            except (chess.engine.EngineError, OSError):
+                pass
+        return self._review_with_builtin_engine()
+
+    def _review_with_stockfish(self, engine_path):
+        engine = chess.engine.SimpleEngine.popen_uci(engine_path)
+        limit = chess.engine.Limit(depth=STOCKFISH_REVIEW_DEPTH)
+        review_board = chess.Board()
+        results = []
+        try:
+            for move in self.last_game_moves:
+                if review_board.turn == chess.WHITE:
+                    eval_before = engine.analyse(review_board, limit)["score"].white().score(mate_score=10000)
+                    san = review_board.san(move)
+                    move_number = review_board.fullmove_number
+                    review_board.push(move)
+                    eval_after = engine.analyse(review_board, limit)["score"].white().score(mate_score=10000)
+                    accuracy = move_accuracy(win_percent(eval_before), win_percent(eval_after))
+                    results.append({
+                        "move_number": move_number,
+                        "san": san,
+                        "score": accuracy_to_score(accuracy),
+                    })
+                else:
+                    review_board.push(move)
+        finally:
+            engine.quit()
+        return results
+
+    def _review_with_builtin_engine(self):
         review_board = chess.Board()
         results = []
         for move in self.last_game_moves:
@@ -679,13 +730,12 @@ class ChessGame:
                 move_evals = self.evaluate_root_moves(review_board, REVIEW_DEPTH)
                 best_eval = max(move_evals.values())
                 played_eval = move_evals[move]
-                loss = max(0, best_eval - played_eval)
-                score = loss_to_score(loss)
+                accuracy = move_accuracy(win_percent(best_eval), win_percent(played_eval))
                 san = review_board.san(move)
                 results.append({
                     "move_number": review_board.fullmove_number,
                     "san": san,
-                    "score": score,
+                    "score": accuracy_to_score(accuracy),
                 })
             review_board.push(move)
         return results

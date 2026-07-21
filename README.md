@@ -22,9 +22,10 @@ every loss comes with a reason.
 - 📈 **Your progress is remembered.** Rating and a full game history persist
   across launches, shown right on the start screen — no more losing track of
   whether you're actually improving.
-- 🔍 **Post-game coaching, no subscription required.** Every move you played
-  gets scored 1–10 against the engine's own best line — blunders in red,
-  brilliancies in green — the same idea as chess.com's move review, built in.
+- 🔍 **Real post-game coaching, no subscription required.** Every move you
+  played is analyzed by [Stockfish](https://stockfishchess.org/) and scored
+  1–10 using the same win-percentage accuracy formula Lichess and chess.com
+  use — blunders in red, brilliancies in green.
 - 🖥️ **Looks like a real game.** Hand-picked Staunton piece art, an animated
   board with a wooden frame, a live move list, and full fullscreen support
   that actually reflows instead of stretching.
@@ -56,7 +57,7 @@ every loss comes with a reason.
   - **Continue** — resume at your saved rating.
   - **Recalibrate** — reset to the 1000 baseline and play a fresh calibration game to re-rank from scratch.
 - **Replay mode** — after a game ends, replay the entire game move-by-move.
-- **Game Review** — like chess.com's post-game analysis: every move you made gets scored 1–10 (based on how much evaluation you gave up compared to the engine's best move at that position), with blunders (≤3) highlighted red and excellent moves (9–10) highlighted green.
+- **Game Review powered by Stockfish** — like chess.com's post-game analysis: every move you made is analyzed by a real chess engine and scored 1–10 using the Lichess/chess.com win-percentage accuracy formula, with blunders (≤3) highlighted red and excellent moves (9–10) highlighted green.
 
 ## Controls
 
@@ -78,8 +79,12 @@ unzip it, and drag `AI Chess Elo.app` into `/Applications`.
 
 ```bash
 pip install -r requirements.txt
+brew install stockfish   # optional but recommended — powers Game Review
 python3 chess_game.py
 ```
+
+Without Stockfish installed, Game Review falls back to a much weaker built-in
+heuristic (still functional, just far less accurate at grading moves).
 
 Run the rating-curve simulation (no GUI) with:
 
@@ -91,11 +96,15 @@ python3 chess_game.py simulate
 
 ```bash
 pip install pyinstaller
-pyinstaller --windowed --name "AI Chess Elo" --icon assets/AppIcon.icns --add-data "assets/pieces:assets/pieces" chess_game.py
+pyinstaller --windowed --name "AI Chess Elo" --icon assets/AppIcon.icns \
+  --add-data "assets/pieces:assets/pieces" \
+  --add-binary "$(brew --prefix stockfish)/bin/stockfish:." \
+  chess_game.py
 ```
 
 This produces `dist/AI Chess Elo.app`, which you can drag into `/Applications`
-and launch like any other app — no terminal required.
+and launch like any other app — no terminal, no separate Stockfish install
+required (it's bundled inside the app).
 
 ## Where your rating is stored
 
@@ -124,18 +133,16 @@ so its search depth — and therefore its difficulty — tracks your rating dire
 
 ## How move review scoring works
 
-For each move you played, the engine searches every legal alternative at that
-position (depth 3) and compares your move's resulting evaluation against the best
-one found. The gap ("evaluation loss") maps to a 1–10 score — 0 loss is a 10,
-losing 1100+ centipawns worth of evaluation is a 1. The evaluation itself accounts
-for material, king safety (castling, and how exposed an uncastled king is), and
-basic piece development, not just raw material — so aimlessly moving one piece
-while ignoring the rest of the board gets penalized instead of scoring perfectly.
+Game Review uses the same method [Lichess documents publicly](https://lichess.org/page/accuracy)
+and chess.com is understood to use a close variant of:
 
-This is a heuristic built on this game's own lightweight search, not a full
-engine analysis — it reliably catches real blunders (hanging pieces, walking into
-mate, abandoning king safety) but won't grade opening theory with the nuance of
-a dedicated chess engine.
+1. Stockfish analyzes the position before your move and the position after it (depth 14), giving a centipawn evaluation for each, from White's perspective.
+2. Each evaluation is converted to a **win percentage** with `50 + 50 * (2 / (1 + e^(-0.00368208 × centipawns)) - 1)` — this is the empirical curve both sites use to turn an engine score into "chances of winning," and it's deliberately non-linear: a swing from +50 to -50 (near equal) matters far more than +500 to +400 (already winning).
+3. The drop in win% caused by your move maps to an accuracy score via `103.1668 × e^(-0.04354 × win%_lost) - 3.1669`, then scaled to this app's 1–10 range.
+
+If Stockfish isn't available, it falls back to a much weaker built-in heuristic
+search that also accounts for king safety and piece development, not just
+material — but a real engine is what makes the scoring trustworthy.
 
 ## Piece artwork
 
@@ -143,3 +150,10 @@ Pieces are the "cburnett" Staunton set created by Colin M.L. Burnett, sourced fr
 [Wikimedia Commons](https://commons.wikimedia.org/wiki/Category:SVG_chess_pieces)
 (also used by Lichess). Licensed under CC BY-SA 3.0 / GFDL 1.2 / GPL2+; source SVGs
 are included under `assets/pieces_svg/`.
+
+## Analysis engine
+
+Game Review is powered by [Stockfish](https://stockfishchess.org/), the free and
+open-source chess engine, licensed under [GPLv3](https://github.com/official-stockfish/Stockfish/blob/master/Copying.txt).
+The packaged app bundles an unmodified Stockfish binary; source is available at
+[github.com/official-stockfish/Stockfish](https://github.com/official-stockfish/Stockfish).
