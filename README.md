@@ -23,17 +23,20 @@ feel like chess.com's rating scale.
   | 1800+ | 5 | Expert |
 
   So a genuinely 1000-rated player faces a moderate opponent (depth 3), not the AI's maximum strength.
-- **Persistent rating.** Your rating is saved to disk after every game and reloaded the next time you launch the app, so the AI keeps pace with you across sessions.
+- **Persistent rating and game history.** Your rating and a log of past games (date, result, rating before/after) are saved to disk after every game and reloaded on launch — the start screen shows a "Recent Games" card with color-coded rating deltas.
 - **Two ways to start:**
   - **Continue** — resume at your saved rating.
   - **Recalibrate** — reset to the 1000 baseline and play a fresh calibration game to re-rank from scratch.
 - **Replay mode** — after a game ends, replay the entire game move-by-move.
+- **Game Review** — like chess.com's post-game analysis: every move you made gets scored 1–10 (based on how much evaluation you gave up compared to the engine's best move at that position), with blunders (≤3) highlighted red and excellent moves (9–10) highlighted green.
+- **Fullscreen.** Press **F11**, drag to resize, or use the native macOS fullscreen button — the board, panel, and every screen (menu, game, review) reflow and rescale to fit.
 
 ## Controls
 
 - **Mouse** — click a piece, then click a highlighted square to move it.
 - **R** — reset the current game.
-- On the game-over screen, click **Replay** to watch the game again.
+- **F11** — toggle fullscreen.
+- On the game-over screen, click **Replay** to watch the game again, or **Review** to see every move scored.
 
 ## Running from source
 
@@ -52,7 +55,7 @@ python3 chess_game.py simulate
 
 ```bash
 pip install pyinstaller
-pyinstaller --windowed --name "AI Chess Elo" --add-data "assets/pieces:assets/pieces" chess_game.py
+pyinstaller --windowed --name "AI Chess Elo" --icon assets/AppIcon.icns --add-data "assets/pieces:assets/pieces" chess_game.py
 ```
 
 This produces `dist/AI Chess Elo.app`, which you can drag into `/Applications`
@@ -80,6 +83,15 @@ game went:
 
 The AI's rating is always kept equal to your own after your first (calibration) game,
 so its search depth — and therefore its difficulty — tracks your rating directly.
+
+## How move review scoring works
+
+For each move you played, the engine searches every legal alternative at that
+position (depth 2) and compares your move's resulting evaluation against the best
+one found. The gap ("evaluation loss") maps to a 1–10 score — 0 loss is a 10,
+losing 600+ centipawns worth of evaluation is a 1. It's a heuristic based on this
+game's own search, not a full engine analysis, but it reliably separates blunders
+from good moves.
 
 ## Piece artwork
 
