@@ -9,6 +9,7 @@ every loss comes with a reason.
 
 [![Platform](https://img.shields.io/badge/platform-macOS-black?logo=apple)](https://github.com/Vangaurdd/checkmate-elo/releases)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue?logo=python)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![License: Pieces CC BY--SA](https://img.shields.io/badge/piece%20art-CC--BY--SA-lightgrey)](#piece-artwork)
 [![Release](https://img.shields.io/github/v/release/Vangaurdd/checkmate-elo?label=latest%20release)](https://github.com/Vangaurdd/checkmate-elo/releases/latest)
 
