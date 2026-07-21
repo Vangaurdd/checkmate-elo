@@ -94,6 +94,46 @@ def rebuild_fonts(cell):
 
 rebuild_fonts(CELL_SIZE)
 
+_FONT_CACHE = {}
+
+
+def _get_font(size, bold=False, name="Arial"):
+    key = (name, size, bold)
+    if key not in _FONT_CACHE:
+        _FONT_CACHE[key] = pygame.font.SysFont(name, size, bold=bold)
+    return _FONT_CACHE[key]
+
+
+def fit_text(text, base_size, max_width, color, bold=False, min_size=10):
+    size = max(min_size, base_size)
+    while size > min_size:
+        font = _get_font(size, bold)
+        if font.size(text)[0] <= max_width:
+            break
+        size -= 1
+    return _get_font(size, bold).render(text, True, color)
+
+
+_GRADIENT_CACHE = {}
+
+
+def get_background_gradient(width, height, top_color=(70, 48, 32), bottom_color=(40, 26, 16)):
+    width, height = max(1, int(width)), max(1, int(height))
+    key = (width, height, top_color, bottom_color)
+    cached = _GRADIENT_CACHE.get("key")
+    if cached != key:
+        surf = pygame.Surface((width, height))
+        for y in range(height):
+            t = y / height
+            r = int(top_color[0] * (1 - t) + bottom_color[0] * t)
+            g = int(top_color[1] * (1 - t) + bottom_color[1] * t)
+            b = int(top_color[2] * (1 - t) + bottom_color[2] * t)
+            pygame.draw.line(surf, (r, g, b), (0, y), (width, y))
+        _GRADIENT_CACHE["key"] = key
+        _GRADIENT_CACHE["surface"] = surf
+    return _GRADIENT_CACHE["surface"]
+
+
 PIECE_IMAGES_SRC = {}
 PIECE_IMAGES = {}
 
@@ -178,6 +218,12 @@ def _alpha_fill(screen, rect, color):
     screen.blit(surf, rect.topleft)
 
 
+def _hover_color(color, hovered, amount=24):
+    if not hovered:
+        return color
+    return tuple(min(255, c + amount) for c in color)
+
+
 REVIEW_DEPTH = 2
 LOSS_THRESHOLDS = [10, 25, 50, 75, 120, 180, 260, 400, 600]
 
@@ -205,6 +251,7 @@ class ChessGame:
         self.animating_move = None
         self.animation_progress = 0
         self.move_history = []
+        self.move_sans = []
         self.last_game_moves = []
         self.ratings_updated = False
         self.last_ai_piece = None
@@ -229,7 +276,7 @@ class ChessGame:
 
     def draw_board(self, screen):
         frame_rect = pygame.Rect(0, 0, int(WINDOW_WIDTH), int(PANEL_TOP))
-        pygame.draw.rect(screen, FRAME_COLOR, frame_rect)
+        screen.blit(get_background_gradient(frame_rect.width, frame_rect.height), (0, 0))
         pygame.draw.rect(
             screen, FRAME_EDGE,
             pygame.Rect(int(BOARD_ORIGIN_X - 3), int(BOARD_ORIGIN_Y - 3), int(BOARD_PIXELS + 6), int(BOARD_PIXELS + 6)),
@@ -287,9 +334,11 @@ class ChessGame:
             screen.blit(label, label.get_rect(center=(x, y)))
         for rank in range(BOARD_SIZE):
             label = label_font.render(str(8 - rank), True, LABEL_COLOR)
-            x = int(BOARD_ORIGIN_X // 2)
+            x = int(BOARD_ORIGIN_X - BOARD_MARGIN / 2)
             y = int(BOARD_ORIGIN_Y + rank * CELL_SIZE + CELL_SIZE // 2)
             screen.blit(label, label.get_rect(center=(x, y)))
+
+        self.draw_move_sidebar(screen)
 
         panel_rect = pygame.Rect(0, int(PANEL_TOP), int(WINDOW_WIDTH), int(WINDOW_HEIGHT - PANEL_TOP))
         pygame.draw.rect(screen, PANEL_BG, panel_rect)
@@ -308,7 +357,10 @@ class ChessGame:
         screen.blit(ai_text, (pad, int(PANEL_TOP + cell * 0.78)))
 
         if self.game_over:
-            result_text = info_font_bold.render(f"Game Over: {self.board.result()}  —  Press R to restart", True, INFO_TEXT)
+            result_text = fit_text(
+                f"Game Over: {self.board.result()}  —  Press R to restart", int(cell * 0.26),
+                WINDOW_WIDTH - pad * 2, INFO_TEXT, bold=True,
+            )
             screen.blit(result_text, (pad, int(PANEL_TOP + cell * 1.12)))
 
             btn_w = int(cell * 1.5)
@@ -317,14 +369,67 @@ class ChessGame:
             btn_y = int(PANEL_TOP + (BOTTOM_PANEL - btn_h) / 2)
             self.replay_button_rect = pygame.Rect(int(WINDOW_WIDTH - pad - btn_w), btn_y, btn_w, btn_h)
             self.review_button_rect = pygame.Rect(self.replay_button_rect.left - gap - btn_w, btn_y, btn_w, btn_h)
+            mouse_pos = pygame.mouse.get_pos()
 
-            pygame.draw.rect(screen, REVIEW_BLUE, self.review_button_rect, border_radius=8)
-            review_text = info_font_bold.render("Review", True, BLACK)
+            review_color = _hover_color(REVIEW_BLUE, self.review_button_rect.collidepoint(mouse_pos))
+            pygame.draw.rect(screen, review_color, self.review_button_rect, border_radius=8)
+            review_text = fit_text("Review", int(cell * 0.26), btn_w - 16, BLACK, bold=True)
             screen.blit(review_text, review_text.get_rect(center=self.review_button_rect.center))
 
-            pygame.draw.rect(screen, GREEN, self.replay_button_rect, border_radius=8)
-            replay_text = info_font_bold.render("Replay", True, BLACK)
+            replay_color = _hover_color(GREEN, self.replay_button_rect.collidepoint(mouse_pos))
+            pygame.draw.rect(screen, replay_color, self.replay_button_rect, border_radius=8)
+            replay_text = fit_text("Replay", int(cell * 0.26), btn_w - 16, BLACK, bold=True)
             screen.blit(replay_text, replay_text.get_rect(center=self.replay_button_rect.center))
+
+    def draw_move_sidebar(self, screen):
+        cell = CELL_SIZE
+        sidebar_left = BOARD_ORIGIN_X + BOARD_PIXELS + BOARD_MARGIN
+        available = WINDOW_WIDTH - sidebar_left - BOARD_MARGIN
+        min_w = cell * 2.0
+        if available < min_w:
+            return
+        sidebar_w = min(available, cell * 3.2)
+        sidebar_rect = pygame.Rect(int(sidebar_left), int(BOARD_ORIGIN_Y), int(sidebar_w), int(BOARD_PIXELS))
+        pygame.draw.rect(screen, PANEL_BG, sidebar_rect, border_radius=10)
+        pygame.draw.rect(screen, PANEL_ACCENT, sidebar_rect, 2, border_radius=10)
+
+        header = info_font_bold.render("Moves", True, INFO_TEXT)
+        screen.blit(header, (sidebar_rect.x + 14, sidebar_rect.y + int(cell * 0.14)))
+        pygame.draw.line(
+            screen, PANEL_ACCENT,
+            (sidebar_rect.x + 14, sidebar_rect.y + int(cell * 0.46)),
+            (sidebar_rect.right - 14, sidebar_rect.y + int(cell * 0.46)), 1,
+        )
+
+        row_h = int(cell * 0.34)
+        list_top = sidebar_rect.y + int(cell * 0.58)
+        visible_rows = max(1, (sidebar_rect.bottom - int(cell * 0.15) - list_top) // row_h)
+
+        pairs = []
+        sans = self.move_sans
+        for i in range(0, len(sans), 2):
+            num = i // 2 + 1
+            white_san = sans[i]
+            black_san = sans[i + 1] if i + 1 < len(sans) else ""
+            pairs.append((num, white_san, black_san))
+
+        visible_pairs = pairs[-visible_rows:]
+        row_y = list_top
+        num_w = int(cell * 0.42)
+        move_w = int((sidebar_w - 28 - num_w) / 2)
+        for num, w_san, b_san in visible_pairs:
+            num_text = hint_font.render(f"{num}.", True, MUTED_TEXT)
+            screen.blit(num_text, (sidebar_rect.x + 14, row_y))
+            w_text = fit_text(w_san, int(cell * 0.20), move_w, INFO_TEXT)
+            screen.blit(w_text, (sidebar_rect.x + 14 + num_w, row_y))
+            if b_san:
+                b_text = fit_text(b_san, int(cell * 0.20), move_w, INFO_TEXT)
+                screen.blit(b_text, (sidebar_rect.x + 14 + num_w + move_w, row_y))
+            row_y += row_h
+
+        if not pairs:
+            placeholder = hint_font.render("No moves yet", True, MUTED_TEXT)
+            screen.blit(placeholder, (sidebar_rect.x + 14, list_top))
 
     def get_square_from_pos(self, pos):
         x, y = pos
@@ -387,8 +492,10 @@ class ChessGame:
         end_x, end_y = end_rect.center
 
         moving_piece = self.board.piece_at(move.from_square)
+        san = self.board.san(move)
         self.board.push(move)
         self.move_history.append(move)
+        self.move_sans.append(san)
         self.last_move = move
 
         self.animating_move = (move, moving_piece, (start_x, start_y), (end_x, end_y))
@@ -409,7 +516,9 @@ class ChessGame:
         end_x, end_y = end_rect.center
 
         moving_piece = self.board.piece_at(move.from_square)
+        san = self.board.san(move)
         self.board.push(move)
+        self.move_sans.append(san)
         self.last_move = move
 
         self.animating_move = (move, moving_piece, (start_x, start_y), (end_x, end_y))
@@ -621,6 +730,7 @@ class ChessGame:
             return
         self.board.reset()
         self.last_move = None
+        self.move_sans = []
         screen.fill(BLACK)
         self.draw_board(screen)
         pygame.display.update()
@@ -630,6 +740,7 @@ class ChessGame:
         pygame.time.delay(1000)
         self.board.reset()
         self.move_history = []
+        self.move_sans = []
         self.selected_square = None
         self.legal_moves = []
         self.game_over = False
@@ -648,6 +759,7 @@ class ChessGame:
         self.animating_move = None
         self.animation_progress = 0
         self.move_history = []
+        self.move_sans = []
         self.ratings_updated = False
         if not self.calibration_mode:
             self.ai_rating = self.player_rating
@@ -697,18 +809,27 @@ def choose_start_mode(screen, clock, saved, fullscreen):
                 if recalibrate_rect.collidepoint(event.pos):
                     return screen, fullscreen, "recalibrate"
 
-        screen.fill(FRAME_COLOR)
+        screen.blit(get_background_gradient(WINDOW_WIDTH, WINDOW_HEIGHT), (0, 0))
+        if (chess.WHITE, chess.KING) in PIECE_IMAGES_SRC:
+            watermark_size = int(WINDOW_HEIGHT * 0.9)
+            watermark = pygame.transform.smoothscale(PIECE_IMAGES_SRC[(chess.WHITE, chess.KING)], (watermark_size, watermark_size))
+            watermark.set_alpha(16)
+            screen.blit(watermark, watermark.get_rect(center=(int(WINDOW_WIDTH * 0.88), int(WINDOW_HEIGHT * 0.4))))
+
         title = title_font.render("AI Chess Elo", True, (216, 178, 122))
         screen.blit(title, title.get_rect(center=(WINDOW_WIDTH // 2, title_y)))
 
+        mouse_pos = pygame.mouse.get_pos()
         for rect, label in ((continue_rect, continue_label), (recalibrate_rect, "Recalibrate (Fresh Baseline Game)")):
-            pygame.draw.rect(screen, PANEL_BG, rect, border_radius=10)
+            hovered = rect.collidepoint(mouse_pos)
+            pygame.draw.rect(screen, _hover_color(PANEL_BG, hovered, 10), rect, border_radius=10)
             pygame.draw.rect(screen, PANEL_ACCENT, rect, 2, border_radius=10)
-            text = option_font.render(label, True, WHITE)
+            text = fit_text(label, int(cell * 0.32), rect.width - 28, WHITE, bold=True)
             screen.blit(text, text.get_rect(center=rect.center))
 
-        hint = hint_font.render(
-            "Recalibrate resets your rating to 1000 and re-ranks you from this game.  (F11: fullscreen)", True, MUTED_TEXT
+        hint = fit_text(
+            "Recalibrate resets your rating to 1000 and re-ranks you from this game.  (F11: fullscreen)",
+            int(cell * 0.20), int(WINDOW_WIDTH * 0.92), MUTED_TEXT,
         )
         screen.blit(hint, hint.get_rect(center=(WINDOW_WIDTH // 2, hint_y)))
 
@@ -779,7 +900,7 @@ def show_review_screen(screen, clock, review_data, fullscreen):
                 if back_button_rect.collidepoint(event.pos):
                     return screen, fullscreen
 
-        screen.fill(FRAME_COLOR)
+        screen.blit(get_background_gradient(WINDOW_WIDTH, WINDOW_HEIGHT), (0, 0))
         title = title_font.render("Game Review", True, (216, 178, 122))
         screen.blit(title, title.get_rect(center=(WINDOW_WIDTH // 2, int(cell * 0.5))))
         subtitle = option_font.render(f"Average Move Quality: {avg:.1f}/10", True, INFO_TEXT)
@@ -799,10 +920,10 @@ def show_review_screen(screen, clock, review_data, fullscreen):
             else:
                 bg, badge = PANEL_BG, PANEL_ACCENT
             pygame.draw.rect(screen, bg, row_rect, border_radius=6)
-            move_text = review_font.render(f"{entry['move_number']}. {entry['san']}", True, INFO_TEXT)
-            screen.blit(move_text, (row_rect.x + 16, row_rect.centery - move_text.get_height() // 2))
             badge_rect = pygame.Rect(0, 0, int(cell * 0.5), int(cell * 0.34))
             badge_rect.midright = (row_rect.right - 16, row_rect.centery)
+            move_text = fit_text(f"{entry['move_number']}. {entry['san']}", int(cell * 0.24), row_rect.width - 32 - badge_rect.width, INFO_TEXT)
+            screen.blit(move_text, (row_rect.x + 16, row_rect.centery - move_text.get_height() // 2))
             pygame.draw.rect(screen, badge, badge_rect, border_radius=6)
             score_text = review_font_bold.render(str(score), True, WHITE)
             screen.blit(score_text, score_text.get_rect(center=badge_rect.center))
@@ -812,9 +933,10 @@ def show_review_screen(screen, clock, review_data, fullscreen):
             empty = hint_font.render("No moves to review.", True, MUTED_TEXT)
             screen.blit(empty, empty.get_rect(center=(WINDOW_WIDTH // 2, list_top + 40)))
 
-        pygame.draw.rect(screen, PANEL_BG, back_button_rect, border_radius=8)
+        back_hovered = back_button_rect.collidepoint(pygame.mouse.get_pos())
+        pygame.draw.rect(screen, _hover_color(PANEL_BG, back_hovered, 10), back_button_rect, border_radius=8)
         pygame.draw.rect(screen, PANEL_ACCENT, back_button_rect, 2, border_radius=8)
-        back_text = option_font.render("Back (Esc)", True, WHITE)
+        back_text = fit_text("Back (Esc)", int(cell * 0.32), back_button_rect.width - 16, WHITE, bold=True)
         screen.blit(back_text, back_text.get_rect(center=back_button_rect.center))
 
         pygame.display.update()
