@@ -113,8 +113,10 @@ After each game, your rating is adjusted with a standard Elo expected-score form
 but the K-factor (how much a single result moves your rating) is scaled by how the
 game went:
 
-- Fast losses are penalized hard (K up to 600) — the system assumes a quick loss with
-  very few pieces moved means the result wasn't a fair fight.
+- Fast losses are penalized hard (K up to 600) — the system looks at how many of
+  *your own* moves it took to lose and how many distinct pieces you actually moved,
+  so a quick loss where you only shuffled one piece around gets hit much harder
+  than a real fighting loss.
 - Wins and draws use smaller K-factors that shrink further the longer the game goes.
 
 The AI's rating is always kept equal to your own after your first (calibration) game,
@@ -123,11 +125,17 @@ so its search depth — and therefore its difficulty — tracks your rating dire
 ## How move review scoring works
 
 For each move you played, the engine searches every legal alternative at that
-position (depth 2) and compares your move's resulting evaluation against the best
+position (depth 3) and compares your move's resulting evaluation against the best
 one found. The gap ("evaluation loss") maps to a 1–10 score — 0 loss is a 10,
-losing 600+ centipawns worth of evaluation is a 1. It's a heuristic based on this
-game's own search, not a full engine analysis, but it reliably separates blunders
-from good moves.
+losing 1100+ centipawns worth of evaluation is a 1. The evaluation itself accounts
+for material, king safety (castling, and how exposed an uncastled king is), and
+basic piece development, not just raw material — so aimlessly moving one piece
+while ignoring the rest of the board gets penalized instead of scoring perfectly.
+
+This is a heuristic built on this game's own lightweight search, not a full
+engine analysis — it reliably catches real blunders (hanging pieces, walking into
+mate, abandoning king safety) but won't grade opening theory with the nuance of
+a dedicated chess engine.
 
 ## Piece artwork
 

@@ -224,8 +224,8 @@ def _hover_color(color, hovered, amount=24):
     return tuple(min(255, c + amount) for c in color)
 
 
-REVIEW_DEPTH = 2
-LOSS_THRESHOLDS = [10, 25, 50, 75, 120, 180, 260, 400, 600]
+REVIEW_DEPTH = 3
+LOSS_THRESHOLDS = [15, 50, 100, 175, 275, 400, 550, 750, 1100]
 
 
 def loss_to_score(loss):
@@ -532,6 +532,42 @@ class ChessGame:
         self.animating_move = None
         self.animation_progress = 0
 
+    def king_safety(self, board, color):
+        non_pawn_material = sum(
+            len(board.pieces(pt, chess.WHITE)) + len(board.pieces(pt, chess.BLACK))
+            for pt in (chess.QUEEN, chess.ROOK, chess.BISHOP, chess.KNIGHT)
+        )
+        if non_pawn_material <= 6:
+            return 0
+
+        king_square = board.king(color)
+        if king_square is None:
+            return 0
+        home_rank = 0 if color == chess.WHITE else 7
+        castled = chess.square_rank(king_square) == home_rank and chess.square_file(king_square) in (2, 6)
+        if castled:
+            return 60
+        has_rights = board.has_kingside_castling_rights(color) or board.has_queenside_castling_rights(color)
+        if not has_rights:
+            rank_distance = abs(chess.square_rank(king_square) - home_rank)
+            return -120 - rank_distance * 40
+        return 0
+
+    DEVELOPMENT_SQUARES = {
+        chess.WHITE: ((chess.KNIGHT, chess.B1), (chess.KNIGHT, chess.G1), (chess.BISHOP, chess.C1), (chess.BISHOP, chess.F1)),
+        chess.BLACK: ((chess.KNIGHT, chess.B8), (chess.KNIGHT, chess.G8), (chess.BISHOP, chess.C8), (chess.BISHOP, chess.F8)),
+    }
+
+    def development_score(self, board, color):
+        if len(board.move_stack) > 30:
+            return 0
+        score = 0
+        for piece_type, square in self.DEVELOPMENT_SQUARES[color]:
+            piece = board.piece_at(square)
+            if piece is None or piece.piece_type != piece_type or piece.color != color:
+                score += 18
+        return score
+
     def evaluate_board(self, board):
         if board.is_checkmate():
             return -99999 if board.turn == chess.WHITE else 99999
@@ -555,6 +591,11 @@ class ChessGame:
                 eval += 30
             else:
                 eval -= 30
+
+        eval += self.king_safety(board, chess.WHITE)
+        eval -= self.king_safety(board, chess.BLACK)
+        eval += self.development_score(board, chess.WHITE)
+        eval -= self.development_score(board, chess.BLACK)
         return eval
 
     def order_moves(self, board, moves):
@@ -694,8 +735,9 @@ class ChessGame:
         else:
             score = 0.5
 
-        moves_made = len(self.move_history)
-        pieces_moved = len(set(move.from_square for move in self.move_history if move.from_square != move.to_square))
+        player_moves = self.move_history[0::2]
+        moves_made = len(player_moves)
+        pieces_moved = len(set(move.from_square for move in player_moves if move.from_square != move.to_square))
 
         if result == "0-1":
             if moves_made < 10:
@@ -993,6 +1035,11 @@ def main():
             })
             history = history[-50:]
             save_ratings(game.player_rating, game.ai_rating, history)
+
+            screen.blit(get_background_gradient(WINDOW_WIDTH, WINDOW_HEIGHT), (0, 0))
+            loading = title_font.render("Analyzing your game…", True, (216, 178, 122))
+            screen.blit(loading, loading.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2)))
+            pygame.display.update()
             game.review_data = game.review_game()
 
         screen.fill(BLACK)
