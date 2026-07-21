@@ -1,14 +1,15 @@
 # AI Chess Elo
 
-A single-player chess game with hand-drawn vector pieces, a minimax AI opponent,
-and an Elo-style rating system calibrated to feel like chess.com's rating scale.
+A single-player chess game with a full wooden board frame, the classic Staunton
+piece set, a minimax AI opponent, and an Elo-style rating system calibrated to
+feel like chess.com's rating scale.
 
 ![Board screenshot](assets/screenshot.png)
 
 ## Features
 
 - **Full chess rules** via [python-chess](https://python-chess.readthedocs.io/) — legal move generation, check/checkmate/stalemate detection, all the way down to en passant and promotion.
-- **Vector-drawn pieces** — every piece (pawn, knight, bishop, rook, queen, king) is drawn with pygame primitives, no image assets or fonts required.
+- **Polished board UI** — wooden frame with rank/file coordinates, drop shadows under every piece, a last-move highlight, and lichess-style move indicators (a dot for a quiet move, a ring for a capture).
 - **Animated moves** — pieces slide to their destination square instead of snapping.
 - **Minimax AI with alpha-beta pruning**, plus a move-ordering heuristic that favors captures/checks and penalizes repetitive shuffling (moving the same piece back and forth).
 - **Elo rating system calibrated to chess.com's scale.** Your rating starts at 1000, and the AI's search depth scales in ~400-point bands to roughly match chess.com's skill tiers:
@@ -51,7 +52,7 @@ python3 chess_game.py simulate
 
 ```bash
 pip install pyinstaller
-pyinstaller --windowed --name "AI Chess Elo" chess_game.py
+pyinstaller --windowed --name "AI Chess Elo" --add-data "assets/pieces:assets/pieces" chess_game.py
 ```
 
 This produces `dist/AI Chess Elo.app`, which you can drag into `/Applications`
@@ -79,3 +80,10 @@ game went:
 
 The AI's rating is always kept equal to your own after your first (calibration) game,
 so its search depth — and therefore its difficulty — tracks your rating directly.
+
+## Piece artwork
+
+Pieces are the "cburnett" Staunton set created by Colin M.L. Burnett, sourced from
+[Wikimedia Commons](https://commons.wikimedia.org/wiki/Category:SVG_chess_pieces)
+(also used by Lichess). Licensed under CC BY-SA 3.0 / GFDL 1.2 / GPL2+; source SVGs
+are included under `assets/pieces_svg/`.

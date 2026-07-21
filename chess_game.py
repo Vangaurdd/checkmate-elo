@@ -13,6 +13,11 @@ APP_SUPPORT_DIR = os.path.expanduser("~/Library/Application Support/AI Chess Elo
 RATINGS_FILE = os.path.join(APP_SUPPORT_DIR, "ratings.json")
 
 
+def resource_path(*parts):
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, *parts)
+
+
 def load_saved_ratings():
     if not os.path.exists(RATINGS_FILE):
         return None
@@ -31,132 +36,72 @@ def save_ratings(player_rating, ai_rating):
 
 BOARD_SIZE = 8
 CELL_SIZE = 100
-BOTTOM_PANEL = 120
-WINDOW_WIDTH = BOARD_SIZE * CELL_SIZE
-WINDOW_HEIGHT = BOARD_SIZE * CELL_SIZE + BOTTOM_PANEL
+BOARD_PIXELS = BOARD_SIZE * CELL_SIZE
+BOARD_MARGIN = 30
+FILE_LABEL_H = 28
+BOTTOM_PANEL = 150
+WINDOW_WIDTH = BOARD_PIXELS + 2 * BOARD_MARGIN
+WINDOW_HEIGHT = BOARD_MARGIN + BOARD_PIXELS + FILE_LABEL_H + BOTTOM_PANEL
+BOARD_ORIGIN_X = BOARD_MARGIN
+BOARD_ORIGIN_Y = BOARD_MARGIN
 
 LIGHT_SQUARE = (240, 217, 181)
 DARK_SQUARE = (181, 136, 99)
-HIGHLIGHT = (186, 202, 68)
-SELECT_HIGHLIGHT = (246, 246, 105)
-INFO_BG = (100, 100, 100)
-INFO_TEXT = (255, 255, 255)
-GREEN = (0, 255, 0)
+SELECT_HIGHLIGHT = (246, 216, 90, 130)
+LAST_MOVE_HIGHLIGHT = (186, 202, 68, 110)
+MOVE_DOT_COLOR = (40, 90, 40, 160)
+CAPTURE_RING_COLOR = (180, 50, 50, 170)
+FRAME_COLOR = (54, 36, 24)
+FRAME_EDGE = (88, 60, 38)
+LABEL_COLOR = (222, 202, 172)
+PANEL_BG = (30, 30, 34)
+PANEL_ACCENT = (90, 66, 40)
+INFO_TEXT = (232, 232, 236)
+MUTED_TEXT = (165, 165, 172)
+GREEN = (86, 170, 90)
 BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
 
-WHITE_PIECE_FILL = (250, 248, 240)
-WHITE_PIECE_OUTLINE = (40, 40, 40)
-BLACK_PIECE_FILL = (30, 30, 35)
-BLACK_PIECE_OUTLINE = (215, 215, 215)
-
 pygame.font.init()
-info_font = pygame.font.SysFont("Arial", 30)
+info_font = pygame.font.SysFont("Arial", 28)
+info_font_bold = pygame.font.SysFont("Arial", 28, bold=True)
+label_font = pygame.font.SysFont("Arial", 16, bold=True)
+
+PIECE_IMAGES = {}
 
 
-def _piece_points(rect, coords):
-    s = rect.width
-    cx = rect.centerx
-    base_y = rect.bottom - s * 0.06
-    return [(cx + dx * s, base_y - dy * s) for dx, dy in coords]
-
-
-def _draw_poly(screen, points, fill, outline, width):
-    pygame.draw.polygon(screen, fill, points)
-    pygame.draw.polygon(screen, outline, points, width)
-
-
-def _draw_circle(screen, center, radius, fill, outline, width):
-    pygame.draw.circle(screen, fill, center, radius)
-    pygame.draw.circle(screen, outline, center, radius, width)
+def init_piece_images():
+    mapping = {
+        chess.KING: "K", chess.QUEEN: "Q", chess.ROOK: "R",
+        chess.BISHOP: "B", chess.KNIGHT: "N", chess.PAWN: "P",
+    }
+    size = int(CELL_SIZE * 0.85)
+    for piece_type, letter in mapping.items():
+        for color, prefix in ((chess.WHITE, "w"), (chess.BLACK, "b")):
+            path = resource_path("assets", "pieces", f"{prefix}{letter}.png")
+            img = pygame.image.load(path).convert_alpha()
+            img = pygame.transform.smoothscale(img, (size, size))
+            PIECE_IMAGES[(color, piece_type)] = img
 
 
 def draw_chess_piece(screen, piece, rect):
-    s = rect.width
-    outline_w = max(2, int(s * 0.025))
-    fill = WHITE_PIECE_FILL if piece.color == chess.WHITE else BLACK_PIECE_FILL
-    outline = WHITE_PIECE_OUTLINE if piece.color == chess.WHITE else BLACK_PIECE_OUTLINE
-    pts = lambda coords: _piece_points(rect, coords)
+    shadow_w = int(rect.width * 0.6)
+    shadow_h = int(rect.height * 0.16)
+    shadow_surf = pygame.Surface((shadow_w, shadow_h), pygame.SRCALPHA)
+    pygame.draw.ellipse(shadow_surf, (0, 0, 0, 70), shadow_surf.get_rect())
+    shadow_rect = shadow_surf.get_rect(center=(rect.centerx, rect.bottom - int(rect.height * 0.09)))
+    screen.blit(shadow_surf, shadow_rect.topleft)
 
-    base = pts([(-0.26, 0.0), (0.26, 0.0), (0.23, 0.07), (-0.23, 0.07)])
-    _draw_poly(screen, base, fill, outline, outline_w)
-    belt = pts([(-0.20, 0.10), (0.20, 0.10)])
-    pygame.draw.line(screen, outline, belt[0], belt[1], max(1, outline_w - 1))
+    img = PIECE_IMAGES[(piece.color, piece.piece_type)]
+    img_rect = img.get_rect(center=rect.center)
+    screen.blit(img, img_rect)
 
-    if piece.piece_type == chess.PAWN:
-        body = pts([(-0.13, 0.07), (0.13, 0.07), (0.09, 0.30), (-0.09, 0.30)])
-        _draw_poly(screen, body, fill, outline, outline_w)
-        collar = pts([(-0.11, 0.30), (0.11, 0.30), (0.11, 0.34), (-0.11, 0.34)])
-        _draw_poly(screen, collar, fill, outline, outline_w)
-        head = pts([(0, 0.47)])[0]
-        _draw_circle(screen, head, s * 0.145, fill, outline, outline_w)
 
-    elif piece.piece_type == chess.ROOK:
-        body = pts([(-0.19, 0.07), (0.19, 0.07), (0.19, 0.50), (-0.19, 0.50)])
-        _draw_poly(screen, body, fill, outline, outline_w)
-        seam_a = pts([(-0.07, 0.11), (-0.07, 0.46)])
-        seam_b = pts([(0.07, 0.11), (0.07, 0.46)])
-        pygame.draw.line(screen, outline, seam_a[0], seam_a[1], max(1, outline_w - 1))
-        pygame.draw.line(screen, outline, seam_b[0], seam_b[1], max(1, outline_w - 1))
-        for mx in (-0.19, -0.05, 0.09):
-            merlon = pts([(mx, 0.50), (mx + 0.10, 0.50), (mx + 0.10, 0.66), (mx, 0.66)])
-            _draw_poly(screen, merlon, fill, outline, outline_w)
+def _alpha_fill(screen, rect, color):
+    surf = pygame.Surface(rect.size, pygame.SRCALPHA)
+    surf.fill(color)
+    screen.blit(surf, rect.topleft)
 
-    elif piece.piece_type == chess.KNIGHT:
-        head = pts([
-            (0.14, 0.07), (0.12, 0.22), (0.22, 0.27), (0.31, 0.34), (0.23, 0.39),
-            (0.29, 0.45), (0.18, 0.52), (0.23, 0.60), (0.11, 0.55), (-0.05, 0.47),
-            (-0.19, 0.32), (-0.19, 0.07),
-        ])
-        _draw_poly(screen, head, fill, outline, outline_w)
-        eye = pts([(0.16, 0.43)])[0]
-        pygame.draw.circle(screen, outline, eye, max(2, int(s * 0.022)))
-        nostril = pts([(0.27, 0.36)])[0]
-        pygame.draw.circle(screen, outline, nostril, max(2, int(s * 0.016)))
-
-    elif piece.piece_type == chess.BISHOP:
-        body = pts([(-0.16, 0.07), (0.16, 0.07), (0.09, 0.38), (-0.09, 0.38)])
-        _draw_poly(screen, body, fill, outline, outline_w)
-        collar = pts([(-0.12, 0.38), (0.12, 0.38), (0.12, 0.42), (-0.12, 0.42)])
-        _draw_poly(screen, collar, fill, outline, outline_w)
-        head = pts([(0, 0.52)])[0]
-        _draw_circle(screen, head, s * 0.135, fill, outline, outline_w)
-        slit_a = pts([(-0.035, 0.58)])[0]
-        slit_b = pts([(0.035, 0.67)])[0]
-        pygame.draw.line(screen, outline, slit_a, slit_b, outline_w)
-        top = pts([(0, 0.70)])[0]
-        _draw_circle(screen, top, s * 0.04, fill, outline, outline_w)
-
-    elif piece.piece_type == chess.QUEEN:
-        body = pts([(-0.17, 0.07), (0.17, 0.07), (0.11, 0.38), (-0.11, 0.38)])
-        _draw_poly(screen, body, fill, outline, outline_w)
-        collar = pts([(-0.14, 0.38), (0.14, 0.38), (0.14, 0.43), (-0.14, 0.43)])
-        _draw_poly(screen, collar, fill, outline, outline_w)
-        crown = pts([
-            (-0.20, 0.43), (-0.20, 0.50), (-0.13, 0.43), (-0.09, 0.54),
-            (-0.045, 0.43), (0, 0.58), (0.045, 0.43), (0.09, 0.54),
-            (0.13, 0.43), (0.20, 0.50), (0.20, 0.43),
-        ])
-        _draw_poly(screen, crown, fill, outline, outline_w)
-        tips = (
-            (-0.20, 0.50, 0.028), (-0.09, 0.54, 0.032), (0, 0.58, 0.038),
-            (0.09, 0.54, 0.032), (0.20, 0.50, 0.028),
-        )
-        for bx, by, r in tips:
-            ball = pts([(bx, by)])[0]
-            _draw_circle(screen, ball, s * r, fill, outline, outline_w)
-
-    else:
-        body = pts([(-0.18, 0.07), (0.18, 0.07), (0.12, 0.42), (-0.12, 0.42)])
-        _draw_poly(screen, body, fill, outline, outline_w)
-        collar = pts([(-0.15, 0.42), (0.15, 0.42), (0.15, 0.48), (-0.15, 0.48)])
-        _draw_poly(screen, collar, fill, outline, outline_w)
-        band = pts([(-0.13, 0.48), (0.13, 0.48), (0.13, 0.53), (-0.13, 0.53)])
-        _draw_poly(screen, band, fill, outline, outline_w)
-        cross_v = pts([(-0.03, 0.53), (0.03, 0.53), (0.03, 0.72), (-0.03, 0.72)])
-        _draw_poly(screen, cross_v, fill, outline, outline_w)
-        cross_h = pts([(-0.085, 0.60), (0.085, 0.60), (0.085, 0.655), (-0.085, 0.655)])
-        _draw_poly(screen, cross_h, fill, outline, outline_w)
 
 class ChessGame:
     def __init__(self, player_rating=1000, ai_rating=1000, calibration_mode=True):
@@ -177,6 +122,7 @@ class ChessGame:
         self.last_game_moves = []
         self.ratings_updated = False
         self.last_ai_piece = None
+        self.last_move = None
         self.ai_move_history = []
         self.max_history = 4
 
@@ -185,27 +131,50 @@ class ChessGame:
         depth = max(1, min(5, depth))
         return depth
 
+    def square_rect(self, square):
+        file = chess.square_file(square)
+        rank = 7 - chess.square_rank(square)
+        return pygame.Rect(
+            BOARD_ORIGIN_X + file * CELL_SIZE,
+            BOARD_ORIGIN_Y + rank * CELL_SIZE,
+            CELL_SIZE, CELL_SIZE,
+        )
+
     def draw_board(self, screen):
+        frame_rect = pygame.Rect(0, 0, WINDOW_WIDTH, BOARD_ORIGIN_Y + BOARD_PIXELS + FILE_LABEL_H)
+        pygame.draw.rect(screen, FRAME_COLOR, frame_rect)
+        pygame.draw.rect(
+            screen, FRAME_EDGE,
+            pygame.Rect(BOARD_ORIGIN_X - 3, BOARD_ORIGIN_Y - 3, BOARD_PIXELS + 6, BOARD_PIXELS + 6),
+            3,
+        )
+
         for rank in range(BOARD_SIZE):
             for file in range(BOARD_SIZE):
                 color = LIGHT_SQUARE if (rank + file) % 2 == 0 else DARK_SQUARE
-                rect = pygame.Rect(file * CELL_SIZE, rank * CELL_SIZE, CELL_SIZE, CELL_SIZE)
+                rect = pygame.Rect(BOARD_ORIGIN_X + file * CELL_SIZE, BOARD_ORIGIN_Y + rank * CELL_SIZE, CELL_SIZE, CELL_SIZE)
                 pygame.draw.rect(screen, color, rect)
 
+        if self.last_move is not None:
+            _alpha_fill(screen, self.square_rect(self.last_move.from_square), LAST_MOVE_HIGHLIGHT)
+            _alpha_fill(screen, self.square_rect(self.last_move.to_square), LAST_MOVE_HIGHLIGHT)
+
         if self.selected_square is not None:
-            sel_file = chess.square_file(self.selected_square)
-            sel_rank = 7 - chess.square_rank(self.selected_square)
-            rect = pygame.Rect(sel_file * CELL_SIZE, sel_rank * CELL_SIZE, CELL_SIZE, CELL_SIZE)
-            pygame.draw.rect(screen, SELECT_HIGHLIGHT, rect)
+            _alpha_fill(screen, self.square_rect(self.selected_square), SELECT_HIGHLIGHT)
             for move in self.legal_moves:
-                dest = move.to_square
-                d_file = chess.square_file(dest)
-                d_rank = 7 - chess.square_rank(dest)
-                dest_rect = pygame.Rect(d_file * CELL_SIZE, d_rank * CELL_SIZE, CELL_SIZE, CELL_SIZE)
-                s = pygame.Surface((CELL_SIZE, CELL_SIZE))
-                s.set_alpha(100)
-                s.fill(HIGHLIGHT)
-                screen.blit(s, dest_rect.topleft)
+                dest_rect = self.square_rect(move.to_square)
+                indicator = pygame.Surface((CELL_SIZE, CELL_SIZE), pygame.SRCALPHA)
+                if self.board.is_capture(move):
+                    pygame.draw.circle(
+                        indicator, CAPTURE_RING_COLOR,
+                        (CELL_SIZE // 2, CELL_SIZE // 2), CELL_SIZE // 2 - 6, 6,
+                    )
+                else:
+                    pygame.draw.circle(
+                        indicator, MOVE_DOT_COLOR,
+                        (CELL_SIZE // 2, CELL_SIZE // 2), CELL_SIZE // 7,
+                    )
+                screen.blit(indicator, dest_rect.topleft)
 
         for square in chess.SQUARES:
             if self.animating_move is not None:
@@ -215,10 +184,7 @@ class ChessGame:
 
             piece = self.board.piece_at(square)
             if piece:
-                file = chess.square_file(square)
-                rank = 7 - chess.square_rank(square)
-                rect = pygame.Rect(file * CELL_SIZE, rank * CELL_SIZE, CELL_SIZE, CELL_SIZE)
-                draw_chess_piece(screen, piece, rect)
+                draw_chess_piece(screen, piece, self.square_rect(square))
 
         if self.animating_move is not None:
             move, piece, start_pos, end_pos = self.animating_move
@@ -228,37 +194,51 @@ class ChessGame:
             rect.center = (current_x, current_y)
             draw_chess_piece(screen, piece, rect)
 
-        panel_rect = pygame.Rect(0, BOARD_SIZE * CELL_SIZE, WINDOW_WIDTH, BOTTOM_PANEL)
-        pygame.draw.rect(screen, INFO_BG, panel_rect)
+        files = "abcdefgh"
+        for file in range(BOARD_SIZE):
+            label = label_font.render(files[file], True, LABEL_COLOR)
+            x = BOARD_ORIGIN_X + file * CELL_SIZE + CELL_SIZE // 2
+            y = BOARD_ORIGIN_Y + BOARD_PIXELS + FILE_LABEL_H // 2
+            screen.blit(label, label.get_rect(center=(x, y)))
+        for rank in range(BOARD_SIZE):
+            label = label_font.render(str(8 - rank), True, LABEL_COLOR)
+            x = BOARD_ORIGIN_X // 2
+            y = BOARD_ORIGIN_Y + rank * CELL_SIZE + CELL_SIZE // 2
+            screen.blit(label, label.get_rect(center=(x, y)))
+
+        panel_top = BOARD_ORIGIN_Y + BOARD_PIXELS + FILE_LABEL_H
+        panel_rect = pygame.Rect(0, panel_top, WINDOW_WIDTH, BOTTOM_PANEL)
+        pygame.draw.rect(screen, PANEL_BG, panel_rect)
+        pygame.draw.rect(screen, PANEL_ACCENT, pygame.Rect(0, panel_top, WINDOW_WIDTH, 3))
 
         turn_str = "Your Turn (White)" if self.board.turn == chess.WHITE else "AI Turn (Black)"
-        turn_text = info_font.render(turn_str, True, INFO_TEXT)
-        screen.blit(turn_text, (20, BOARD_SIZE * CELL_SIZE + 10))
+        turn_text = info_font_bold.render(turn_str, True, INFO_TEXT)
+        screen.blit(turn_text, (24, panel_top + 14))
 
-        rating_text = info_font.render(f"Player: {int(self.player_rating)}   AI: {int(self.ai_rating)}", True, INFO_TEXT)
-        screen.blit(rating_text, (20, BOARD_SIZE * CELL_SIZE + 40))
+        rating_text = info_font.render(f"Player: {int(self.player_rating)}   AI: {int(self.ai_rating)}", True, MUTED_TEXT)
+        screen.blit(rating_text, (24, panel_top + 48))
 
-        ai_text = info_font.render(f"AI Depth: {self.ai_depth}", True, INFO_TEXT)
-        screen.blit(ai_text, (20, BOARD_SIZE * CELL_SIZE + 70))
+        ai_text = info_font.render(f"AI Depth: {self.ai_depth}", True, MUTED_TEXT)
+        screen.blit(ai_text, (24, panel_top + 78))
 
         if self.game_over:
-            result_text = info_font.render(f"Game Over: {self.board.result()}", True, INFO_TEXT)
-            screen.blit(result_text, (300, BOARD_SIZE * CELL_SIZE + 10))
-            inst_text = info_font.render("Press R to restart OR click [Replay] below", True, INFO_TEXT)
-            screen.blit(inst_text, (300, BOARD_SIZE * CELL_SIZE + 40))
+            result_text = info_font_bold.render(f"Game Over: {self.board.result()}  —  Press R to restart", True, INFO_TEXT)
+            screen.blit(result_text, (24, panel_top + 112))
 
-            self.replay_button_rect = pygame.Rect(WINDOW_WIDTH - 150, BOARD_SIZE * CELL_SIZE + 40, 130, 40)
-            pygame.draw.rect(screen, GREEN, self.replay_button_rect)
-            replay_text = info_font.render("Replay", True, BLACK)
+            self.replay_button_rect = pygame.Rect(WINDOW_WIDTH - 160, panel_top + (BOTTOM_PANEL - 44) // 2, 136, 44)
+            pygame.draw.rect(screen, GREEN, self.replay_button_rect, border_radius=8)
+            replay_text = info_font_bold.render("Replay", True, BLACK)
             text_rect = replay_text.get_rect(center=self.replay_button_rect.center)
             screen.blit(replay_text, text_rect)
 
     def get_square_from_pos(self, pos):
         x, y = pos
-        if x < 0 or x >= WINDOW_WIDTH or y < 0 or y >= BOARD_SIZE * CELL_SIZE:
+        bx = x - BOARD_ORIGIN_X
+        by = y - BOARD_ORIGIN_Y
+        if bx < 0 or bx >= BOARD_PIXELS or by < 0 or by >= BOARD_PIXELS:
             return None
-        file = x // CELL_SIZE
-        rank = y // CELL_SIZE
+        file = bx // CELL_SIZE
+        rank = by // CELL_SIZE
         chess_rank = 7 - rank
         square = chess.square(file, chess_rank)
         return square
@@ -306,18 +286,15 @@ class ChessGame:
                 self.legal_moves = []
 
     def animate_move(self, move, screen, clock):
-        start_file = chess.square_file(move.from_square)
-        start_rank = 7 - chess.square_rank(move.from_square)
-        end_file = chess.square_file(move.to_square)
-        end_rank = 7 - chess.square_rank(move.to_square)
-        start_x = start_file * CELL_SIZE + CELL_SIZE // 2
-        start_y = start_rank * CELL_SIZE + CELL_SIZE // 2
-        end_x = end_file * CELL_SIZE + CELL_SIZE // 2
-        end_y = end_rank * CELL_SIZE + CELL_SIZE // 2
+        start_rect = self.square_rect(move.from_square)
+        end_rect = self.square_rect(move.to_square)
+        start_x, start_y = start_rect.center
+        end_x, end_y = end_rect.center
 
         moving_piece = self.board.piece_at(move.from_square)
         self.board.push(move)
         self.move_history.append(move)
+        self.last_move = move
 
         self.animating_move = (move, moving_piece, (start_x, start_y), (end_x, end_y))
         frames = 15
@@ -331,17 +308,14 @@ class ChessGame:
         self.animation_progress = 0
 
     def animate_move_replay(self, move, screen, clock):
-        start_file = chess.square_file(move.from_square)
-        start_rank = 7 - chess.square_rank(move.from_square)
-        end_file = chess.square_file(move.to_square)
-        end_rank = 7 - chess.square_rank(move.to_square)
-        start_x = start_file * CELL_SIZE + CELL_SIZE // 2
-        start_y = start_rank * CELL_SIZE + CELL_SIZE // 2
-        end_x = end_file * CELL_SIZE + CELL_SIZE // 2
-        end_y = end_rank * CELL_SIZE + CELL_SIZE // 2
+        start_rect = self.square_rect(move.from_square)
+        end_rect = self.square_rect(move.to_square)
+        start_x, start_y = start_rect.center
+        end_x, end_y = end_rect.center
 
         moving_piece = self.board.piece_at(move.from_square)
         self.board.push(move)
+        self.last_move = move
 
         self.animating_move = (move, moving_piece, (start_x, start_y), (end_x, end_y))
         frames = 15
@@ -520,6 +494,7 @@ class ChessGame:
         if not self.last_game_moves:
             return
         self.board.reset()
+        self.last_move = None
         screen.fill(BLACK)
         self.draw_board(screen)
         pygame.display.update()
@@ -535,6 +510,7 @@ class ChessGame:
         self.game_result = None
         self.ratings_updated = False
         self.ai_move_history = []
+        self.last_move = None
 
     def reset_game(self):
         self.board.reset()
@@ -550,15 +526,16 @@ class ChessGame:
         if not self.calibration_mode:
             self.ai_rating = self.player_rating
         self.ai_move_history = []
+        self.last_move = None
 
 def choose_start_mode(screen, clock, saved):
-    title_font = pygame.font.Font(None, 64)
+    title_font = pygame.font.Font(None, 68)
     option_font = pygame.font.Font(None, 36)
     hint_font = pygame.font.Font(None, 24)
 
     continue_label = f"Continue (Rating: {int(saved[0])})" if saved else "Continue (Rating: 1000)"
-    continue_rect = pygame.Rect(WINDOW_WIDTH // 2 - 220, 340, 440, 60)
-    recalibrate_rect = pygame.Rect(WINDOW_WIDTH // 2 - 220, 430, 440, 60)
+    continue_rect = pygame.Rect(WINDOW_WIDTH // 2 - 220, 360, 440, 60)
+    recalibrate_rect = pygame.Rect(WINDOW_WIDTH // 2 - 220, 450, 440, 60)
 
     while True:
         clock.tick(30)
@@ -572,19 +549,20 @@ def choose_start_mode(screen, clock, saved):
                 if recalibrate_rect.collidepoint(event.pos):
                     return "recalibrate"
 
-        screen.fill(BLACK)
-        title = title_font.render("AI Chess", True, (200, 0, 0))
-        screen.blit(title, title.get_rect(center=(WINDOW_WIDTH // 2, 200)))
+        screen.fill(FRAME_COLOR)
+        title = title_font.render("AI Chess Elo", True, (216, 178, 122))
+        screen.blit(title, title.get_rect(center=(WINDOW_WIDTH // 2, 210)))
 
         for rect, label in ((continue_rect, continue_label), (recalibrate_rect, "Recalibrate (Fresh Baseline Game)")):
-            pygame.draw.rect(screen, INFO_BG, rect)
+            pygame.draw.rect(screen, PANEL_BG, rect, border_radius=10)
+            pygame.draw.rect(screen, PANEL_ACCENT, rect, 2, border_radius=10)
             text = option_font.render(label, True, WHITE)
             screen.blit(text, text.get_rect(center=rect.center))
 
         hint = hint_font.render(
-            "Recalibrate resets your rating to 1000 and re-ranks you from this game.", True, (180, 180, 180)
+            "Recalibrate resets your rating to 1000 and re-ranks you from this game.", True, MUTED_TEXT
         )
-        screen.blit(hint, hint.get_rect(center=(WINDOW_WIDTH // 2, 500)))
+        screen.blit(hint, hint.get_rect(center=(WINDOW_WIDTH // 2, 525)))
 
         pygame.display.update()
 
@@ -593,6 +571,7 @@ def main():
     screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
     pygame.display.set_caption("AI Chess – Rated & Replay Mode")
     clock = pygame.time.Clock()
+    init_piece_images()
 
     saved = load_saved_ratings()
     mode = choose_start_mode(screen, clock, saved)
