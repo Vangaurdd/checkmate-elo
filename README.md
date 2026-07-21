@@ -12,7 +12,7 @@ every loss comes with a reason.
 [![License: Pieces CC BY--SA](https://img.shields.io/badge/piece%20art-CC--BY--SA-lightgrey)](#piece-artwork)
 [![Release](https://img.shields.io/github/v/release/Vangaurdd/checkmate-elo?label=latest%20release)](https://github.com/Vangaurdd/checkmate-elo/releases/latest)
 
-![Checkmate Elo board with move list](assets/screenshot.png)
+![Checkmate Elo gameplay demo](assets/demo.gif)
 
 ## Why you'll want this
 
@@ -166,3 +166,9 @@ Game Review is powered by [Stockfish](https://stockfishchess.org/), the free and
 open-source chess engine, licensed under [GPLv3](https://github.com/official-stockfish/Stockfish/blob/master/Copying.txt).
 The packaged app bundles an unmodified Stockfish binary; source is available at
 [github.com/official-stockfish/Stockfish](https://github.com/official-stockfish/Stockfish).
+
+---
+
+If you enjoy playing, a ⭐ on the repo helps other people find it.
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Vangaurdd/checkmate-elo&type=Date)](https://star-history.com/#Vangaurdd/checkmate-elo&Date)
