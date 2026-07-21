@@ -208,7 +208,8 @@ def handle_resize_events(event, screen, fullscreen):
     return screen, fullscreen
 
 
-def draw_chess_piece(screen, piece, rect):
+def draw_chess_piece(screen, piece, rect, images=None):
+    images = images if images is not None else PIECE_IMAGES
     shadow_w = int(rect.width * 0.6)
     shadow_h = int(rect.height * 0.16)
     shadow_surf = pygame.Surface((max(1, shadow_w), max(1, shadow_h)), pygame.SRCALPHA)
@@ -216,9 +217,63 @@ def draw_chess_piece(screen, piece, rect):
     shadow_rect = shadow_surf.get_rect(center=(rect.centerx, rect.bottom - int(rect.height * 0.09)))
     screen.blit(shadow_surf, shadow_rect.topleft)
 
-    img = PIECE_IMAGES[(piece.color, piece.piece_type)]
+    img = images[(piece.color, piece.piece_type)]
     img_rect = img.get_rect(center=rect.center)
     screen.blit(img, img_rect)
+
+
+_REVIEW_PIECE_CACHE = {"size": None, "images": {}}
+
+
+def get_review_piece_images(size):
+    size = max(16, int(size))
+    if _REVIEW_PIECE_CACHE["size"] != size:
+        images = {key: pygame.transform.smoothscale(src, (size, size)) for key, src in PIECE_IMAGES_SRC.items()}
+        _REVIEW_PIECE_CACHE["size"] = size
+        _REVIEW_PIECE_CACHE["images"] = images
+    return _REVIEW_PIECE_CACHE["images"]
+
+
+def draw_review_board(screen, board, last_move, origin_x, origin_y, cell_size, piece_images):
+    board_pixels = cell_size * BOARD_SIZE
+    pygame.draw.rect(
+        screen, FRAME_EDGE,
+        pygame.Rect(int(origin_x - 3), int(origin_y - 3), int(board_pixels + 6), int(board_pixels + 6)), 3,
+    )
+    for rank in range(BOARD_SIZE):
+        for file in range(BOARD_SIZE):
+            color = LIGHT_SQUARE if (rank + file) % 2 == 0 else DARK_SQUARE
+            rect = pygame.Rect(
+                int(origin_x + file * cell_size), int(origin_y + rank * cell_size),
+                int(cell_size) + 1, int(cell_size) + 1,
+            )
+            pygame.draw.rect(screen, color, rect)
+
+    def sq_rect(square):
+        file = chess.square_file(square)
+        rank = 7 - chess.square_rank(square)
+        return pygame.Rect(int(origin_x + file * cell_size), int(origin_y + rank * cell_size), int(cell_size), int(cell_size))
+
+    if last_move is not None:
+        _alpha_fill(screen, sq_rect(last_move.from_square), LAST_MOVE_HIGHLIGHT)
+        _alpha_fill(screen, sq_rect(last_move.to_square), LAST_MOVE_HIGHLIGHT)
+
+    for square in chess.SQUARES:
+        piece = board.piece_at(square)
+        if piece:
+            draw_chess_piece(screen, piece, sq_rect(square), piece_images)
+
+    files = "abcdefgh"
+    for file in range(BOARD_SIZE):
+        label = label_font.render(files[file], True, LABEL_COLOR)
+        x = origin_x + file * cell_size + cell_size / 2
+        y = origin_y + board_pixels + cell_size * 0.16
+        screen.blit(label, label.get_rect(center=(int(x), int(y))))
+    for rank in range(BOARD_SIZE):
+        label = label_font.render(str(8 - rank), True, LABEL_COLOR)
+        x = origin_x - cell_size * 0.20
+        y = origin_y + rank * cell_size + cell_size / 2
+        screen.blit(label, label.get_rect(center=(int(x), int(y))))
 
 
 def _alpha_fill(screen, rect, color):
@@ -702,6 +757,7 @@ class ChessGame:
         limit = chess.engine.Limit(depth=STOCKFISH_REVIEW_DEPTH)
         review_board = chess.Board()
         results = []
+        ply = 0
         try:
             for move in self.last_game_moves:
                 if review_board.turn == chess.WHITE:
@@ -709,15 +765,19 @@ class ChessGame:
                     san = review_board.san(move)
                     move_number = review_board.fullmove_number
                     review_board.push(move)
+                    ply += 1
                     eval_after = engine.analyse(review_board, limit)["score"].white().score(mate_score=10000)
                     accuracy = move_accuracy(win_percent(eval_before), win_percent(eval_after))
                     results.append({
                         "move_number": move_number,
                         "san": san,
                         "score": accuracy_to_score(accuracy),
+                        "accuracy": accuracy,
+                        "ply": ply,
                     })
                 else:
                     review_board.push(move)
+                    ply += 1
         finally:
             engine.quit()
         return results
@@ -725,6 +785,7 @@ class ChessGame:
     def _review_with_builtin_engine(self):
         review_board = chess.Board()
         results = []
+        ply = 0
         for move in self.last_game_moves:
             if review_board.turn == chess.WHITE:
                 move_evals = self.evaluate_root_moves(review_board, REVIEW_DEPTH)
@@ -732,12 +793,19 @@ class ChessGame:
                 played_eval = move_evals[move]
                 accuracy = move_accuracy(win_percent(best_eval), win_percent(played_eval))
                 san = review_board.san(move)
+                move_number = review_board.fullmove_number
+                review_board.push(move)
+                ply += 1
                 results.append({
-                    "move_number": review_board.fullmove_number,
+                    "move_number": move_number,
                     "san": san,
                     "score": accuracy_to_score(accuracy),
+                    "accuracy": accuracy,
+                    "ply": ply,
                 })
-            review_board.push(move)
+            else:
+                review_board.push(move)
+                ply += 1
         return results
 
     def ai_move(self, screen, clock):
@@ -956,23 +1024,78 @@ def choose_start_mode(screen, clock, saved, fullscreen):
         pygame.display.update()
 
 
-def show_review_screen(screen, clock, review_data, fullscreen):
+def show_review_screen(screen, clock, review_data, all_moves, fullscreen):
+    accuracies = [r["accuracy"] for r in review_data]
+    avg_score = (len(accuracies) / sum(1 / max(a, 0.5) for a in accuracies) / 10) if accuracies else 0
+
+    score_by_ply = {r["ply"]: r["score"] for r in review_data}
+    all_sans = []
+    positions = [chess.Board()]
+    temp_board = chess.Board()
+    for move in all_moves:
+        all_sans.append(temp_board.san(move))
+        temp_board.push(move)
+        positions.append(temp_board.copy(stack=False))
+
+    pairs = []
+    for i in range(0, len(all_moves), 2):
+        white_ply = i + 1
+        black_ply = i + 2 if i + 1 < len(all_moves) else None
+        pairs.append({
+            "move_number": i // 2 + 1,
+            "white_san": all_sans[i],
+            "white_ply": white_ply,
+            "white_score": score_by_ply.get(white_ply),
+            "black_san": all_sans[i + 1] if black_ply else None,
+            "black_ply": black_ply,
+        })
+
+    current_ply = len(all_moves)
     scroll = 0
-    avg = sum(r["score"] for r in review_data) / len(review_data) if review_data else 0
 
     while True:
         clock.tick(30)
         cell = CELL_SIZE
-        header_h = int(cell * 1.5)
-        row_h = int(cell * 0.5)
-        list_top = header_h
-        list_bottom = WINDOW_HEIGHT - int(cell * 0.7)
-        visible_rows = max(1, (list_bottom - list_top) // row_h)
-        max_scroll = max(0, len(review_data) - visible_rows)
+        top_margin = cell * 0.95
+        bottom_margin = cell * 2.0
+        board_origin_x = cell * 0.4
+        list_min_w = cell * 3.0
+        available_h = WINDOW_HEIGHT - top_margin - bottom_margin
+        available_w_for_board = WINDOW_WIDTH - board_origin_x - cell * 0.4 - list_min_w - cell * 0.35
+        review_cell = max(20, min(available_h / 8.35, available_w_for_board / 8.2))
+        board_pixels = review_cell * BOARD_SIZE
+        board_origin_y = top_margin
+
+        list_x = board_origin_x + board_pixels + cell * 0.4
+        list_w = WINDOW_WIDTH - list_x - cell * 0.3
+        list_top = top_margin
+        list_bottom = board_origin_y + board_pixels
+        row_h = max(18, int(cell * 0.34))
+        visible_rows = max(1, int((list_bottom - list_top) // row_h))
+        max_scroll = max(0, len(pairs) - visible_rows)
         scroll = max(0, min(scroll, max_scroll))
 
+        nav_y = int(board_origin_y + board_pixels + cell * 0.28)
+        nav_w = int(cell * 0.55)
+        prev_rect = pygame.Rect(int(board_origin_x), nav_y, nav_w, nav_w)
+        next_rect = pygame.Rect(int(board_origin_x + board_pixels - nav_w), nav_y, nav_w, nav_w)
         back_button_rect = pygame.Rect(0, 0, int(cell * 1.8), int(cell * 0.5))
-        back_button_rect.center = (WINDOW_WIDTH // 2, WINDOW_HEIGHT - int(cell * 0.38))
+        back_button_rect.center = (
+            int(board_origin_x + board_pixels / 2),
+            int(nav_y + nav_w + cell * 0.55),
+        )
+
+        move_row_rects = []
+        row_y = list_top
+        for idx, pair in enumerate(pairs[scroll:scroll + visible_rows]):
+            row_rects = {
+                "pair": pair,
+                "num_pos": (int(list_x), int(row_y)),
+                "white_rect": pygame.Rect(int(list_x + cell * 0.34), int(row_y), int((list_w - cell * 0.34) * 0.5), row_h),
+                "black_rect": pygame.Rect(int(list_x + cell * 0.34 + (list_w - cell * 0.34) * 0.5), int(row_y), int((list_w - cell * 0.34) * 0.5), row_h),
+            }
+            move_row_rects.append(row_rects)
+            row_y += row_h
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -982,6 +1105,10 @@ def show_review_screen(screen, clock, review_data, fullscreen):
             if event.type == pygame.KEYDOWN:
                 if event.key in (pygame.K_ESCAPE, pygame.K_BACKSPACE):
                     return screen, fullscreen
+                if event.key == pygame.K_LEFT:
+                    current_ply = max(0, current_ply - 1)
+                if event.key == pygame.K_RIGHT:
+                    current_ply = min(len(all_moves), current_ply + 1)
                 if event.key == pygame.K_DOWN:
                     scroll = min(max_scroll, scroll + 1)
                 if event.key == pygame.K_UP:
@@ -991,41 +1118,79 @@ def show_review_screen(screen, clock, review_data, fullscreen):
             if event.type == pygame.MOUSEBUTTONDOWN:
                 if back_button_rect.collidepoint(event.pos):
                     return screen, fullscreen
+                if prev_rect.collidepoint(event.pos):
+                    current_ply = max(0, current_ply - 1)
+                if next_rect.collidepoint(event.pos):
+                    current_ply = min(len(all_moves), current_ply + 1)
+                for row in move_row_rects:
+                    if row["white_rect"].collidepoint(event.pos):
+                        current_ply = row["pair"]["white_ply"]
+                    elif row["pair"]["black_ply"] and row["black_rect"].collidepoint(event.pos):
+                        current_ply = row["pair"]["black_ply"]
 
         screen.blit(get_background_gradient(WINDOW_WIDTH, WINDOW_HEIGHT), (0, 0))
-        title = title_font.render("Game Review", True, (216, 178, 122))
-        screen.blit(title, title.get_rect(center=(WINDOW_WIDTH // 2, int(cell * 0.5))))
-        subtitle = option_font.render(f"Average Move Quality: {avg:.1f}/10", True, INFO_TEXT)
-        screen.blit(subtitle, subtitle.get_rect(center=(WINDOW_WIDTH // 2, int(cell * 1.0))))
+        title = fit_text("Game Review", int(cell * 0.5), WINDOW_WIDTH * 0.6, (216, 178, 122), bold=True)
+        screen.blit(title, title.get_rect(midleft=(int(board_origin_x), int(cell * 0.42))))
+        subtitle = fit_text(f"Average Move Quality: {avg_score:.1f}/10", int(cell * 0.24), WINDOW_WIDTH * 0.6, MUTED_TEXT)
+        screen.blit(subtitle, subtitle.get_rect(midleft=(int(board_origin_x), int(cell * 0.75))))
 
-        list_w = min(int(cell * 6.5), int(WINDOW_WIDTH * 0.9))
-        list_x = (WINDOW_WIDTH - list_w) // 2
-        visible = review_data[scroll:scroll + visible_rows]
-        y = list_top
-        for entry in visible:
-            row_rect = pygame.Rect(int(list_x), int(y), int(list_w), int(row_h - 6))
-            score = entry["score"]
-            if score <= 3:
-                bg, badge = BAD_BG, BAD_BADGE
-            elif score >= 9:
-                bg, badge = GOOD_BG, GOOD_BADGE
-            else:
-                bg, badge = PANEL_BG, PANEL_ACCENT
-            pygame.draw.rect(screen, bg, row_rect, border_radius=6)
-            badge_rect = pygame.Rect(0, 0, int(cell * 0.5), int(cell * 0.34))
-            badge_rect.midright = (row_rect.right - 16, row_rect.centery)
-            move_text = fit_text(f"{entry['move_number']}. {entry['san']}", int(cell * 0.24), row_rect.width - 32 - badge_rect.width, INFO_TEXT)
-            screen.blit(move_text, (row_rect.x + 16, row_rect.centery - move_text.get_height() // 2))
-            pygame.draw.rect(screen, badge, badge_rect, border_radius=6)
-            score_text = review_font_bold.render(str(score), True, WHITE)
-            screen.blit(score_text, score_text.get_rect(center=badge_rect.center))
-            y += row_h
+        board = positions[current_ply]
+        last_move = all_moves[current_ply - 1] if current_ply > 0 else None
+        piece_images = get_review_piece_images(review_cell * 0.85)
+        draw_review_board(screen, board, last_move, board_origin_x, board_origin_y, review_cell, piece_images)
 
-        if not review_data:
+        mouse_pos = pygame.mouse.get_pos()
+        for rect, symbol in ((prev_rect, "<"), (next_rect, ">")):
+            pygame.draw.rect(screen, _hover_color(PANEL_BG, rect.collidepoint(mouse_pos), 10), rect, border_radius=6)
+            pygame.draw.rect(screen, PANEL_ACCENT, rect, 2, border_radius=6)
+            sym_text = option_font.render(symbol, True, WHITE)
+            screen.blit(sym_text, sym_text.get_rect(center=rect.center))
+
+        status_score = score_by_ply.get(current_ply)
+        if current_ply == 0:
+            status = "Starting position"
+        else:
+            mover = "White" if current_ply % 2 == 1 else "Black"
+            move_no = (current_ply + 1) // 2
+            san = all_sans[current_ply - 1]
+            status = f"{move_no}. {san} ({mover})"
+            if status_score is not None:
+                status += f"  —  {status_score}/10"
+        status_text = fit_text(status, int(cell * 0.22), int(board_pixels - nav_w * 2 - 20), INFO_TEXT)
+        screen.blit(status_text, status_text.get_rect(center=(int(board_origin_x + board_pixels / 2), nav_y + nav_w // 2)))
+
+        for row in move_row_rects:
+            pair = row["pair"]
+            num_text = hint_font.render(f"{pair['move_number']}.", True, MUTED_TEXT)
+            screen.blit(num_text, row["num_pos"])
+
+            for rect, san, ply, score in (
+                (row["white_rect"], pair["white_san"], pair["white_ply"], pair["white_score"]),
+                (row["black_rect"], pair["black_san"], pair["black_ply"], None),
+            ):
+                if san is None:
+                    continue
+                selected = ply == current_ply
+                if selected:
+                    pygame.draw.rect(screen, PANEL_ACCENT, rect, border_radius=4)
+                elif rect.collidepoint(mouse_pos):
+                    pygame.draw.rect(screen, _hover_color(PANEL_BG, True, 14), rect, border_radius=4)
+                label = san
+                if score is not None:
+                    label = f"{san} ({score})"
+                color = INFO_TEXT
+                if score is not None and score <= 3:
+                    color = BAD_BADGE
+                elif score is not None and score >= 9:
+                    color = GOOD_BADGE
+                text = fit_text(label, int(cell * 0.22), rect.width - 8, color)
+                screen.blit(text, (rect.x + 6, rect.centery - text.get_height() // 2))
+
+        if not pairs:
             empty = hint_font.render("No moves to review.", True, MUTED_TEXT)
-            screen.blit(empty, empty.get_rect(center=(WINDOW_WIDTH // 2, list_top + 40)))
+            screen.blit(empty, empty.get_rect(center=(list_x + list_w / 2, list_top + 40)))
 
-        back_hovered = back_button_rect.collidepoint(pygame.mouse.get_pos())
+        back_hovered = back_button_rect.collidepoint(mouse_pos)
         pygame.draw.rect(screen, _hover_color(PANEL_BG, back_hovered, 10), back_button_rect, border_radius=8)
         pygame.draw.rect(screen, PANEL_ACCENT, back_button_rect, 2, border_radius=8)
         back_text = fit_text("Back (Esc)", int(cell * 0.32), back_button_rect.width - 16, WHITE, bold=True)
@@ -1063,7 +1228,7 @@ def main():
                         game.replay_game(screen, clock)
                         continue
                     if hasattr(game, "review_button_rect") and game.review_button_rect.collidepoint(pygame.mouse.get_pos()):
-                        screen, fullscreen = show_review_screen(screen, clock, game.review_data or [], fullscreen)
+                        screen, fullscreen = show_review_screen(screen, clock, game.review_data or [], game.last_game_moves, fullscreen)
                         continue
                 if game.board.turn == chess.WHITE and not game.game_over:
                     game.handle_click(pygame.mouse.get_pos(), screen, clock)

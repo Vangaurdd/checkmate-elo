@@ -57,14 +57,15 @@ every loss comes with a reason.
   - **Continue** — resume at your saved rating.
   - **Recalibrate** — reset to the 1000 baseline and play a fresh calibration game to re-rank from scratch.
 - **Replay mode** — after a game ends, replay the entire game move-by-move.
-- **Game Review powered by Stockfish** — like chess.com's post-game analysis: every move you made is analyzed by a real chess engine and scored 1–10 using the Lichess/chess.com win-percentage accuracy formula, with blunders (≤3) highlighted red and excellent moves (9–10) highlighted green.
+- **Game Review powered by Stockfish** — like chess.com's post-game analysis: every move you made is analyzed by a real chess engine and scored 1–10 using the Lichess/chess.com win-percentage accuracy formula, with blunders (≤3) highlighted red and excellent moves (9–10) highlighted green. Click any move to jump the board to that exact position and rewatch the game move-by-move.
 
 ## Controls
 
 - **Mouse** — click a piece, then click a highlighted square to move it.
 - **R** — reset the current game.
 - **F11** — toggle fullscreen.
-- On the game-over screen, click **Replay** to watch the game again, or **Review** to see every move scored.
+- On the game-over screen, click **Replay** to watch the game again, or **Review** to open Game Review.
+- In Game Review, **click any move** in the list to jump the board to that exact position — a full rewatch with every move's score, not just a list. Use **◀ ▶** (or the arrow keys) to step move-by-move.
 
 ## Get it
 
@@ -138,7 +139,14 @@ and chess.com is understood to use a close variant of:
 
 1. Stockfish analyzes the position before your move and the position after it (depth 14), giving a centipawn evaluation for each, from White's perspective.
 2. Each evaluation is converted to a **win percentage** with `50 + 50 * (2 / (1 + e^(-0.00368208 × centipawns)) - 1)` — this is the empirical curve both sites use to turn an engine score into "chances of winning," and it's deliberately non-linear: a swing from +50 to -50 (near equal) matters far more than +500 to +400 (already winning).
-3. The drop in win% caused by your move maps to an accuracy score via `103.1668 × e^(-0.04354 × win%_lost) - 3.1669`, then scaled to this app's 1–10 range.
+3. The drop in win% caused by your move maps to an accuracy score via `103.1668 × e^(-0.04354 × win%_lost) - 3.1669`, then scaled to this app's 1–10 range for that move's badge.
+
+The headline **Average Move Quality** is not a plain average of those per-move
+scores — like Lichess, it's a **harmonic mean**, which is dragged down much
+harder by a single bad blunder than an arithmetic mean would be. A game with
+one real blunder and otherwise-fine moves will show a noticeably lower average
+than "sum and divide," matching the intuition that one big mistake should hurt
+your overall grade more than a plain average gives it credit for.
 
 If Stockfish isn't available, it falls back to a much weaker built-in heuristic
 search that also accounts for king safety and piece development, not just
